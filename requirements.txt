@@ -6,12 +6,10 @@ python-dotenv
 python-multipart
 requests
 google-generativeai
-
-# Librerías de Ciencia de Datos (Vi que las tenías en el log)
 pandas
 numpy
 scikit-learn
 matplotlib
-
-# IMPORTANTE: Para servidores (Linux) usa siempre la versión "headless" de OpenCV
 opencv-python-headless
+httpx
+jinja2
