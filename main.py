@@ -1003,7 +1003,7 @@ async def health_check():
 STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 # La URL a la que Strava debe responder (debe coincidir con lo que pusiste en la web de Strava)
-REDIRECT_URI = "http://localhost:8000/api/strava/callback" 
+REDIRECT_URI = "http://activo-entrena-9e40e8.up.railway.app/api/strava/callback" 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:53421") # Puerto de Flutter
 
 @app.get("/api/strava/login")
