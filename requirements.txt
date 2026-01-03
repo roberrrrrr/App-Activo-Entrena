@@ -1,15 +1,24 @@
+# --- Servidor y API ---
 fastapi
 uvicorn
-sqlalchemy
-psycopg2-binary
-python-dotenv
 python-multipart
+python-dotenv
+
+# --- Base de Datos ---
+psycopg2-binary
+sqlalchemy
+
+# --- Utilidades y Peticiones (Tus imports clave) ---
+httpx
 requests
+APScheduler
+
+# --- IA y Ciencia de Datos (Vistos en tus logs anteriores) ---
+# Si no usas alguno de estos en OTROS archivos, puedes borrarlos para desplegar más rápido
 google-generativeai
 pandas
 numpy
 scikit-learn
 matplotlib
 opencv-python-headless
-httpx
 jinja2
