@@ -1112,4 +1112,11 @@ if __name__ == "__main__":
     import uvicorn
     # Ejecutar servidor en localhost:8000
     # Para acceder desde emulador Android, usa: uvicorn main:app --host 0.0.0.0 --port 8000
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # 2. Obtenemos el puerto que nos da Railway (variable 'PORT').
+    # Si esa variable no existe (porque estás en tu PC), usa el 8000 por defecto.
+    port = int(os.environ.get("PORT", 8000))
+
+    print(f"🚀 Iniciando servidor en el puerto: {port}")
+
+    # 3. Pasamos esa variable 'port' a uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=port)
