@@ -546,7 +546,9 @@ async def sync_last_activity_raw(user_id: int):
                 ST_GeomFromText(%s, 4326), 
                 ST_Length(ST_GeomFromText(%s, 4326)::geography), 
                 %s
-            )
+                )
+                RETURNING distance_meters;
+            
         """
         cursor.execute(query_run, (user_id, current_season_id, strava_id, wkt_linestring, wkt_linestring, elevation_gain))
         distance_meters = cursor.fetchone()[0]
