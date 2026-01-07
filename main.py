@@ -105,7 +105,7 @@ class RunCreate(BaseModel):
 
 class UserStats(BaseModel):
     total_distance_km: float
-    total_area_hectares: float # Usamos hectáreas para que el número sea legible
+    total_elevation_m: float # altimetria
     season_name: str
     is_strava_connected: bool = False  # Indica si el usuario tiene Strava conectado
 
@@ -480,6 +480,10 @@ async def sync_last_activity_raw(user_id: int):
             name_run = last_run.get('name', 'Carrera sin nombre')
             print(f"✅ [Paso 3] Actividad encontrada: ID {strava_id} - '{name_run}'")
             
+            # --- NUEVO: OBTENER ELEVACIÓN ---
+            # Si es plano devuelve 0.0
+            elevation_gain = float(last_run.get('total_elevation_gain', 0.0))
+
             # VERIFICAR DUPLICADOS
             cursor.execute("SELECT 1 FROM user_runs WHERE strava_id = %s AND user_id = %s", (strava_id, user_id))
             if cursor.fetchone():
@@ -511,11 +515,13 @@ async def sync_last_activity_raw(user_id: int):
         points_str_list = [f"{p[1]} {p[0]}" for p in raw_coords]
         wkt_linestring = f"LINESTRING({', '.join(points_str_list)})"
         
-        # --- D. DETECTAR SI ES CERRADO ---
+        # ------------------ESTO NO VA -----------------#
+        """# --- D. DETECTAR SI ES CERRADO ---
         start_p = raw_coords[0]
         end_p = raw_coords[-1]
         distance_gap = calculate_distance(start_p[0], start_p[1], end_p[0], end_p[1])
         is_closed_loop = distance_gap < 50.0
+        """
 
         # --- E. DETECTAR TEMPORADA ---
         print("👉 [Paso 6] Buscando temporada actual...")
@@ -534,98 +540,111 @@ async def sync_last_activity_raw(user_id: int):
         # --- F. GUARDAR RECORRIDO ---
         print("👉 [Paso 7] Insertando carrera en user_runs...")
         query_run = """
-            INSERT INTO user_runs (user_id, season_id, strava_id, geom, distance_meters)
+            INSERT INTO user_runs (user_id, season_id, strava_id, geom, distance_meters, elevation_gain)
             VALUES (
                 %s, %s, %s,
                 ST_GeomFromText(%s, 4326), 
-                ST_Length(ST_GeomFromText(%s, 4326)::geography)
+                ST_Length(ST_GeomFromText(%s, 4326)::geography), 
+                %s
             )
         """
-        cursor.execute(query_run, (user_id, current_season_id, strava_id, wkt_linestring, wkt_linestring))
-        
-        # --- G. ACTUALIZAR TERRITORIOS ---
-        territory_msg = "Carrera guardada (Ruta abierta)"
-        
-        if is_closed_loop:
-            print("👉 [Paso 8] ¡Loop cerrado detectado! Calculando territorio...")
-            if len(raw_coords) >= 3:
-                # ---------------------------------------------------------
-                # COMIENZO DEL BLOQUE MODIFICADO "CHIVATO" 🕵️‍♂️
-                # ---------------------------------------------------------
-                
-                query_territory = """
-                WITH linea_base AS (
-                    SELECT ST_GeomFromText(%s, 4326) as geom
-                ),
-                linea_cerrada AS (
-                    /* 1. Cerramos la línea */
-                    SELECT ST_AddPoint(geom, ST_StartPoint(geom)) as geom 
-                    FROM linea_base
-                ),
-                calculo_area AS (
-                    /* 2. Intentamos calcular el área interna (PLAN A) */
-                    SELECT ST_MakeValid(ST_BuildArea(geom)) as geom_interna
-                    FROM linea_cerrada
-                )
-                INSERT INTO territories (user_id, season_id, geom, area_sq_meters)
-                SELECT 
-                    %s, 
-                    %s,
-                    /* LOGICA MAESTRA: COALESCE elige el primer valor que NO sea nulo */
-                    ST_Multi(
-                        COALESCE(
-                            /* Intento 1: Si hay área interna válida y no vacía, úsala */
-                            CASE 
-                                WHEN NOT ST_IsEmpty(geom_interna) AND ST_GeometryType(geom_interna) = 'ST_Polygon' 
-                                THEN geom_interna 
-                                ELSE NULL 
-                            END,
-                            
-                            /* Intento 2 (Plan B): Si falló lo anterior, crea un buffer (grosor) de 2 metros alrededor de la línea */
-                            ST_Buffer((SELECT geom FROM linea_cerrada)::geography, 2)::geometry
-                        )
-                    ),
-                    0 -- El área se recalcula bien abajo
-                FROM calculo_area
-                ON CONFLICT (user_id, season_id) 
-                DO UPDATE SET 
-                    geom = ST_Multi(ST_Union(territories.geom, EXCLUDED.geom)),
-                    created_at = NOW()
-                RETURNING area_sq_meters; 
-                """
+        cursor.execute(query_run, (user_id, current_season_id, strava_id, wkt_linestring, wkt_linestring, elevation_gain))
+        distance_meters = cursor.fetchone()[0]
+        conn.commit()
 
-                # Ejecutamos (mismo orden de parámetros)
-                cursor.execute(query_territory, (wkt_linestring, user_id, current_season_id))
-                
-                # --- VERIFICACIÓN FINAL ---
-                resultado_db = cursor.fetchone()
-                
-                if resultado_db:
-                    # Recalcular área total exacta
-                    cursor.execute("""
-                        UPDATE territories 
-                        SET area_sq_meters = ST_Area(geom::geography) 
-                        WHERE user_id = %s AND season_id = %s
-                        RETURNING area_sq_meters
-                    """, (user_id, current_season_id))
-                    
-                    area_total = cursor.fetchone()[0]
-                    territory_msg = f"¡Territorio conquistado! Área total: {area_total:.2f} m²"
-                    print(f"✅ [Paso 8] ÉXITO: Territorio guardado. Área total: {area_total:.2f} m²")
-                else:
-                    # Si llega aquí, es imposible matemáticamente (salvo error grave de PostGIS)
-                    print("💀 [Paso 8] IMPOSIBLE: Ni el área interna ni el buffer funcionaron.")
+        print(f"✅ [ÉXITO] Guardado: {distance_meters:.0f}m distancia, {elevation_gain:.0f}m altura.")
 
-                conn.commit() # Asegúrate que este commit esté aquí
-
-            else:
-                print("⚠️ [Aviso] Loop cerrado pero con geometría inválida (menos de 3 puntos).")
         return {
             "status": "success",
-            "message": territory_msg,
-            "distance_gap": distance_gap,
-            "is_closed": is_closed_loop
+            "message": f"¡Guardado! +{elevation_gain}m escalados.",
+            "added_elevation": elevation_gain,
+            "added_distance": distance_meters
         }
+
+        # ------  ESTO NO VA ------- #
+        # # --- G. ACTUALIZAR TERRITORIOS ---
+        # territory_msg = "Carrera guardada (Ruta abierta)"
+        
+        # if is_closed_loop:
+        #     print("👉 [Paso 8] ¡Loop cerrado detectado! Calculando territorio...")
+        #     if len(raw_coords) >= 3:
+        #         # ---------------------------------------------------------
+        #         # COMIENZO DEL BLOQUE MODIFICADO "CHIVATO" 🕵️‍♂️
+        #         # ---------------------------------------------------------
+                
+        #         query_territory = """
+        #         WITH linea_base AS (
+        #             SELECT ST_GeomFromText(%s, 4326) as geom
+        #         ),
+        #         linea_cerrada AS (
+        #             /* 1. Cerramos la línea */
+        #             SELECT ST_AddPoint(geom, ST_StartPoint(geom)) as geom 
+        #             FROM linea_base
+        #         ),
+        #         calculo_area AS (
+        #             /* 2. Intentamos calcular el área interna (PLAN A) */
+        #             SELECT ST_MakeValid(ST_BuildArea(geom)) as geom_interna
+        #             FROM linea_cerrada
+        #         )
+        #         INSERT INTO territories (user_id, season_id, geom, area_sq_meters)
+        #         SELECT 
+        #             %s, 
+        #             %s,
+        #             /* LOGICA MAESTRA: COALESCE elige el primer valor que NO sea nulo */
+        #             ST_Multi(
+        #                 COALESCE(
+        #                     /* Intento 1: Si hay área interna válida y no vacía, úsala */
+        #                     CASE 
+        #                         WHEN NOT ST_IsEmpty(geom_interna) AND ST_GeometryType(geom_interna) = 'ST_Polygon' 
+        #                         THEN geom_interna 
+        #                         ELSE NULL 
+        #                     END,
+                            
+        #                     /* Intento 2 (Plan B): Si falló lo anterior, crea un buffer (grosor) de 2 metros alrededor de la línea */
+        #                     ST_Buffer((SELECT geom FROM linea_cerrada)::geography, 2)::geometry
+        #                 )
+        #             ),
+        #             0 -- El área se recalcula bien abajo
+        #         FROM calculo_area
+        #         ON CONFLICT (user_id, season_id) 
+        #         DO UPDATE SET 
+        #             geom = ST_Multi(ST_Union(territories.geom, EXCLUDED.geom)),
+        #             created_at = NOW()
+        #         RETURNING area_sq_meters; 
+        #         """
+
+        #         # Ejecutamos (mismo orden de parámetros)
+        #         cursor.execute(query_territory, (wkt_linestring, user_id, current_season_id))
+                
+        #         # --- VERIFICACIÓN FINAL ---
+        #         resultado_db = cursor.fetchone()
+                
+        #         if resultado_db:
+        #             # Recalcular área total exacta
+        #             cursor.execute("""
+        #                 UPDATE territories 
+        #                 SET area_sq_meters = ST_Area(geom::geography) 
+        #                 WHERE user_id = %s AND season_id = %s
+        #                 RETURNING area_sq_meters
+        #             """, (user_id, current_season_id))
+                    
+        #             area_total = cursor.fetchone()[0]
+        #             territory_msg = f"¡Territorio conquistado! Área total: {area_total:.2f} m²"
+        #             print(f"✅ [Paso 8] ÉXITO: Territorio guardado. Área total: {area_total:.2f} m²")
+        #         else:
+        #             # Si llega aquí, es imposible matemáticamente (salvo error grave de PostGIS)
+        #             print("💀 [Paso 8] IMPOSIBLE: Ni el área interna ni el buffer funcionaron.")
+
+        #         conn.commit() # Asegúrate que este commit esté aquí
+
+        #     else:
+        #         print("⚠️ [Aviso] Loop cerrado pero con geometría inválida (menos de 3 puntos).")
+        # return {
+        #     "status": "success",
+        #     "message": territory_msg,
+        #     "distance_gap": distance_gap,
+        #     "is_closed": is_closed_loop
+        # }
 
     except HTTPException as he:
         # Re-lanzar excepciones HTTP controladas
@@ -760,36 +779,52 @@ def get_user_stats(user_id: str):
             current_season_id = season_row[0]
             season_name = season_row[1]
 
-        # 2. Calcular Distancia Total (Tabla user_runs)
-        # Si no hay temporada activa, devolvemos 0 en lugar de hacer una consulta que fallaría
+        # 2. CALCULAR DISTANCIA Y ALTIMETRÍA (En una sola consulta) 🚀
+        total_dist_m = 0.0
+        total_elev_m = 0.0
+
         if current_season_id is not None:
+            # Sumamos distancia y elevación directamente de user_runs
             cursor.execute("""
-                SELECT COALESCE(SUM(distance_meters), 0) 
+                SELECT 
+                    COALESCE(SUM(distance_meters), 0), 
+                    COALESCE(SUM(elevation_gain), 0)
                 FROM user_runs 
                 WHERE user_id = %s AND season_id = %s
             """, (user_id, current_season_id))
-            total_dist_m = cursor.fetchone()[0]
-        else:
-            total_dist_m = 0
+            
+            result = cursor.fetchone()
+            if result:
+                total_dist_m = float(result[0])
+                total_elev_m = float(result[1])
 
-        # 3. Calcular Área Total (Tabla territories)
-        # Si no hay temporada activa, devolvemos 0
-        if current_season_id is not None:
-            cursor.execute("""
-                SELECT COALESCE(SUM(area_sq_meters), 0) 
-                FROM territories 
-                WHERE user_id = %s AND season_id = %s
-            """, (user_id, current_season_id))
-            total_area_m2 = cursor.fetchone()[0]
-        else:
-            total_area_m2 = 0
-
+        # 3. RETORNAR RESULTADO
         return UserStats(
-            total_distance_km=total_dist_m / 1000.0, # Convertir a KM
-            total_area_hectares=total_area_m2 / 10000.0, # Convertir a Hectáreas (1 ha = 10,000 m2)
+            total_distance_km=total_dist_m / 1000.0,    # Metros a KM
+            total_elevation_m=total_elev_m,             # Metros (Directo)
             season_name=season_name,
             is_strava_connected=is_strava_connected
         )
+
+        # ----- ESTO NO VA ---- #
+        # # 3. Calcular Área Total (Tabla territories)
+        # # Si no hay temporada activa, devolvemos 0
+        # if current_season_id is not None:
+        #     cursor.execute("""
+        #         SELECT COALESCE(SUM(area_sq_meters), 0) 
+        #         FROM territories 
+        #         WHERE user_id = %s AND season_id = %s
+        #     """, (user_id, current_season_id))
+        #     total_area_m2 = cursor.fetchone()[0]
+        # else:
+        #     total_area_m2 = 0
+
+        # return UserStats(
+        #     total_distance_km=total_dist_m / 1000.0, # Convertir a KM
+        #     total_area_hectares=total_area_m2 / 10000.0, # Convertir a Hectáreas (1 ha = 10,000 m2)
+        #     season_name=season_name,
+        #     is_strava_connected=is_strava_connected
+        # )
     except HTTPException:
         # Re-lanzar excepciones HTTP
         raise
@@ -814,7 +849,7 @@ def get_user_stats(user_id: str):
 # --- ENDPOINT 2: RANKINGS (LEADERBOARD) ---
 @app.get("/api/leaderboard")
 def get_leaderboard(type: str, season_id: int = 1):
-    # type puede ser 'distance' o 'area'
+    # type puede ser 'distance' o 'hight'
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -835,27 +870,33 @@ def get_leaderboard(type: str, season_id: int = 1):
             current_season_id = season_row[0]
             season_name = season_row[1]
 
-        query = ""
+        # Si no hay temporada, retornamos lista vacía directo
+        if current_season_id is None:
+            return { "results": [] }
+
+        # 2. CONFIGURAR COLUMNA Y CONVERSIÓN SEGÚN EL TIPO
+        # Definimos qué columna sumar y por cuánto dividir
         if type == 'distance':
-            query = """
-                SELECT u.username, SUM(r.distance_meters) as total
-                FROM user_runs r
-                JOIN users u ON r.user_id = u.id
-                WHERE r.season_id = %s
-                GROUP BY u.username
-                ORDER BY total DESC
-                LIMIT 20
-            """
-        elif type == 'area':
-            query = """
-                SELECT u.username, SUM(t.area_sq_meters) as total
-                FROM territories t
-                JOIN users u ON t.user_id = u.id
-                WHERE t.season_id = %s
-                GROUP BY u.username
-                ORDER BY total DESC
-                LIMIT 20
-            """
+            db_column = 'distance_meters'
+            divisor = 1000.0  # Metros -> Kilómetros
+        elif type == 'hight': # "hight" es el valor que manda tu app
+            db_column = 'elevation_gain'
+            divisor = 1.0     # Metros -> Metros (No se convierte)
+        else:
+            # Si mandan un tipo desconocido, devolvemos vacío
+            return { "results": [] }
+
+        # 3. CONSULTA DINÁMICA (Optimized)
+        # Usamos f-string para la columna porque db_column lo definimos nosotros (es seguro)
+        query = f"""
+            SELECT u.username, SUM(r.{db_column}) as total
+            FROM user_runs r
+            JOIN users u ON r.user_id = u.id
+            WHERE r.season_id = %s
+            GROUP BY u.username
+            ORDER BY total DESC
+            LIMIT 30
+        """
         
         cursor.execute(query, (current_season_id,))
         rows = cursor.fetchall()
@@ -865,13 +906,13 @@ def get_leaderboard(type: str, season_id: int = 1):
             # 1. Protegemos el valor: Si row[1] es None, usamos 0.0
             raw_score = row[1] if row[1] is not None else 0.0
 
-        # 2. Ahora sí hacemos la división sin miedo
-            val = raw_score / 1000.0 if type == 'distance' else raw_score / 10000.0
+        # Aplicamos la división (KM o Metros planos)
+            val = raw_score / divisor
             
             results.append({
                 "rank": index + 1,
                 "username": row[0],
-                "value": val
+                "value": round(val, 2) # Redondeamos a 2 decimales para que se vea bonito
             })
             
         return { "results": results } # Devolvemos formato compatible con tu ApiClient
@@ -914,14 +955,18 @@ def process_pending_season_closures():
                 GROUP BY user_id ORDER BY 5 DESC LIMIT 3
             """, (s_id, s_id))
 
-            # B. Calcular Podio Territorio
+            # B. Calcular Podio Altitud
+            # Sumamos elevation_gain (se queda en metros, no se divide)
+            # Usamos la categoría 'hight' para mantener consistencia
             cursor.execute("""
                 INSERT INTO season_podiums (season_id, user_id, category, rank, final_score)
-                SELECT %s, user_id, 'territory', 
-                       RANK() OVER (ORDER BY SUM(area_sq_meters) DESC),
-                       SUM(area_sq_meters) / 10000.0
-                FROM territories WHERE season_id = %s
-                GROUP BY user_id ORDER BY 5 DESC LIMIT 3
+                SELECT %s, user_id, 'hight', 
+                       RANK() OVER (ORDER BY SUM(elevation_gain) DESC),
+                       SUM(elevation_gain)
+                FROM user_runs WHERE season_id = %s
+                GROUP BY user_id 
+                ORDER BY 5 DESC -- Ordena por la columna 5 (final_score)
+                LIMIT 3
             """, (s_id, s_id))
             
             # C. Marcar temporada como inactiva (opcional, por seguridad)
