@@ -904,7 +904,9 @@ def get_leaderboard(type: str, season_id: int = 1):
         results = []
         for index, row in enumerate(rows):
             # 1. Protegemos el valor: Si row[1] es None, usamos 0.0
-            raw_score = row[1] if row[1] is not None else 0.0
+            # Convertimos explícitamente a float() lo que viene de la DB.
+            # Si row[1] es None, usamos 0.0 (que ya es float).
+            raw_score = float(row[1]) if row[1] is not None else 0.0
 
         # Aplicamos la división (KM o Metros planos)
             val = raw_score / divisor
