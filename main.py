@@ -111,6 +111,7 @@ class UserStats(BaseModel):
 
 class LeaderboardEntry(BaseModel):
     username: str
+    user_id: int
     value: float # Puede ser km o m2
     rank: int
 
@@ -891,11 +892,11 @@ def get_leaderboard(type: str, season_id: int = 1):
         # 3. CONSULTA DINÁMICA (Optimized)
         # Usamos f-string para la columna porque db_column lo definimos nosotros (es seguro)
         query = f"""
-            SELECT u.username, SUM(r.{db_column}) as total
+            SELECT u.id, u.username, SUM(r.{db_column}) as total
             FROM user_runs r
             JOIN users u ON r.user_id = u.id
             WHERE r.season_id = %s
-            GROUP BY u.username
+            GROUP BY u.id, u.username
             ORDER BY total DESC
             LIMIT 30
         """
@@ -905,17 +906,18 @@ def get_leaderboard(type: str, season_id: int = 1):
         
         results = []
         for index, row in enumerate(rows):
-            # 1. Protegemos el valor: Si row[1] es None, usamos 0.0
-            # Convertimos explícitamente a float() lo que viene de la DB.
-            # Si row[1] es None, usamos 0.0 (que ya es float).
-            raw_score = float(row[1]) if row[1] is not None else 0.0
-
+            # row ahora tiene 3 elementos: 
+            # row[0] = id
+            # row[1] = username
+            # row[2] = total
+            raw_score = float(row[2]) if row[2] is not None else 0.0
         # Aplicamos la división (KM o Metros planos)
             val = raw_score / divisor
             
             results.append({
                 "rank": index + 1,
-                "username": row[0],
+                "user_id": row[0],
+                "username": row[1],
                 "value": round(val, 2) # Redondeamos a 2 decimales para que se vea bonito
             })
             
