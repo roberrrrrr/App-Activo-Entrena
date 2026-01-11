@@ -42,7 +42,7 @@ def scheduled_season_check():
 async def lifespan(app: FastAPI):
     # --- LO QUE PASA ANTES DE ARRANCAR ---
     scheduler = BackgroundScheduler()
-    scheduler.add_job(scheduled_season_check, 'cron', hour=12, minute=30)
+    scheduler.add_job(scheduled_season_check, 'cron', hour=0, minute=1)
     scheduler.start()
     print("✅ Planificador iniciado")
     
