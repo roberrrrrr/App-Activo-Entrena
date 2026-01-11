@@ -32,7 +32,7 @@ def scheduled_season_check():
     print("⏰ Ejecutando chequeo automático...")
     try:
         # Se llama a sí mismo para ejecutar la lógica de cierre
-        requests.post("http://activo-entrena-9e40e8.up.railway.app/api/admin/process-pending-closures")
+        requests.post("https://activo-entrena-9e40e8.up.railway.app/api/admin/process-pending-closures")
     except Exception as e:
         print(f"Error: {e}")
 
@@ -42,7 +42,7 @@ def scheduled_season_check():
 async def lifespan(app: FastAPI):
     # --- LO QUE PASA ANTES DE ARRANCAR ---
     scheduler = BackgroundScheduler()
-    scheduler.add_job(scheduled_season_check, 'cron', hour=12, minute=25)
+    scheduler.add_job(scheduled_season_check, 'cron', hour=12, minute=30)
     scheduler.start()
     print("✅ Planificador iniciado")
     
