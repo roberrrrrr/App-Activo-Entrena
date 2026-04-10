@@ -1,3 +1,23 @@
+# Gym Tracking & Management App 🏃‍♂️📱
+
+Aplicación móvil de alto rendimiento para el seguimiento de actividad física y gestión de comunidades deportivas.
+
+### 🌟 Características Principales
+- **Tracking GPS:** Sincronización de rutas y actividades.
+- **Integración con Strava:** Implementación de flujo **OAuth2** para sincronización de datos de terceros.
+- **Gamificación:** Rankings en tiempo real basados en el rendimiento de los socios.
+
+### 🛠️ Stack Tecnológico
+- **Mobile:** Flutter (Dart).
+- **API Backend:** Python (FastAPI).
+- **Base de Datos:** PostgreSQL con funciones de ventana para analítica.
+- **Infraestructura:** Railway (HTTPS, Enrutamiento de dominios).
+
+### 🧠 Ingeniería Aplicada
+- **Suavizado de GPS:** Desarrollo de algoritmos de decimación de puntos para optimizar la visualización de rutas en mapas y reducir el almacenamiento en DB.
+- **Automatización:** Tareas en segundo plano con **APScheduler** para cierres de temporada y procesamiento de datos.
+
+
 # Backend Flutter App - FastAPI + PostgreSQL
 
 Backend API para la aplicación Flutter que maneja autenticación y se conecta a PostgreSQL.
