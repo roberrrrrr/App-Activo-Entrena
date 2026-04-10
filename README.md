@@ -1,4 +1,4 @@
-# Gym Tracking & Management App 🏃‍♂️📱
+# Gym Tracking & Management App 🏃‍♂️📱 
 
 Aplicación móvil de alto rendimiento para el seguimiento de actividad física y gestión de comunidades deportivas.
 
